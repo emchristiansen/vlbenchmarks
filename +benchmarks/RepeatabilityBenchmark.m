@@ -229,13 +229,13 @@ classdef RepeatabilityBenchmark < benchmarks.GenericBenchmark ...
           [framesA descriptorsA] = featExtractor.extractFeatures(imageAPath);
           [framesB descriptorsB] = featExtractor.extractFeatures(imageBPath);
           [score numMatches bestMatches reprojFrames] = obj.testFeatures(...
-            tf, imageASize, imageBSize, framesA, framesB,...
+            featExtractor, tf, imageASize, imageBSize, framesA, framesB,...
             descriptorsA, descriptorsB);
         else
           [framesA] = featExtractor.extractFeatures(imageAPath);
           [framesB] = featExtractor.extractFeatures(imageBPath);
           [score numMatches bestMatches reprojFrames] = ...
-            obj.testFeatures(tf,imageASize, imageBSize,framesA, framesB);
+            obj.testFeatures(featExtractor, tf,imageASize, imageBSize,framesA, framesB);
         end
         if featExtractor.UseCache
           results = {score numMatches bestMatches reprojFrames};
@@ -249,7 +249,7 @@ classdef RepeatabilityBenchmark < benchmarks.GenericBenchmark ...
     end
 
     function [score numMatches matches reprojFrames] = ...
-        testFeatures(obj, tf, imageASize, imageBSize, framesA, framesB, ...
+        testFeatures(obj, featExtractor, tf, imageASize, imageBSize, framesA, framesB, ...
         descriptorsA, descriptorsB)
       % testFeatures Compute repeatability of given image features
       %   [SCORE NUM_MATCHES] = obj.testFeatures(TF, IMAGE_A_SIZE,
@@ -291,7 +291,9 @@ classdef RepeatabilityBenchmark < benchmarks.GenericBenchmark ...
       if exist('descriptorsA','var') && exist('descriptorsB','var')
         if size(framesA,2) ~= size(descriptorsA,2) ...
             || size(framesB,2) ~= size(descriptorsB,2)
-          obj.error('Number of frames and descriptors must be the same.');
+          if (~strfind(featExtractor.Name, 'NCCLogPolar'))
+            obj.error('Number of frames and descriptors must be the same.');
+          end
         end
       elseif matchDescriptors
         obj.error('Unable to match descriptors without descriptors.');
@@ -338,9 +340,17 @@ classdef RepeatabilityBenchmark < benchmarks.GenericBenchmark ...
         end
 
         if matchDescriptors
-          descriptorsA = descriptorsA(:,visibleFramesA);
-          descriptorsB = descriptorsB(:,visibleFramesB);
+          if ~isempty(strfind(featExtractor.Name, 'NCCLogPolar'))
+            descriptorsA = descriptorsA(visibleFramesA);
+            descriptorsB = descriptorsB(visibleFramesB);
+          else
+            descriptorsA = descriptorsA(:,visibleFramesA);
+            descriptorsB = descriptorsB(:,visibleFramesB);
+          end
         end
+        
+        obj.info('After culling, %d/%d frames remain.',...
+          size(framesA,2),size(framesB,2));
       end
 
       if ~normFrames
@@ -399,8 +409,16 @@ classdef RepeatabilityBenchmark < benchmarks.GenericBenchmark ...
 
       if matchDescriptors
         obj.info('Computing cross distances between all descriptors');
-        dists = vl_alldist2(single(descriptorsA),single(descriptorsB),...
-          obj.Opts.descriptorsDistanceMetric);
+        if ~isempty(strfind(featExtractor.Name, 'NCCLogPolar'))
+          matcher = org.opencv.contrib.NCCLogPolarMatcher(8);
+          openCVA = matrixNCCBlockToOpenCV(descriptorsA);
+          openCVB = matrixNCCBlockToOpenCV(descriptorsB);
+          distanceMat = org.opencv.contrib.Contrib.matchAllPairs(matcher, openCVA, openCVB);
+          dists = matToMatrix(distanceMat);
+        else
+          dists = vl_alldist2(single(descriptorsA),single(descriptorsB),...
+            obj.Opts.descriptorsDistanceMetric);
+        end
         obj.info('Sorting distances')
         [dists, perm] = sort(dists(:),'ascend');
 
